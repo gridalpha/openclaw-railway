@@ -35,8 +35,21 @@ token. Instead of the Railway shell, use the built-in helper:
 2. Open **`/setup`**, paste the same token, and **Approve** the pending request.
 3. Back in the Control UI, click **Connect** again.
 
+On a fresh instance the site root (`/`) redirects to `/setup` automatically until
+the first device is paired; after that, `/` goes to the Control UI.
+
 The `/setup` endpoint is token-gated — approving a device grants full operator
 access, so it demands the same gateway token before listing or approving anything.
+Only the device pairing happens here; channels and the model provider are set up
+inside the OpenClaw Control UI after pairing.
+
+## Files
+
+- `Dockerfile` — builds `FROM openclaw/openclaw:latest`, adds Caddy + the helper.
+- `entrypoint.sh` — chowns the volume, drops to `node`, supervises the 3 processes.
+- `Caddyfile` — routes `/`, `/setup*`, and everything else.
+- `approver.mjs` — the token-gated pairing server (logic only).
+- `setup.html` — the `/setup` page markup, served by `approver.mjs`.
 
 ## Required variables
 

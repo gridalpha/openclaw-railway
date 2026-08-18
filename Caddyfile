@@ -15,6 +15,13 @@
 }
 
 :{$PORT:8080} {
+	# Bare "/" goes to the approver, which redirects first-time (unpaired) visitors
+	# to /setup and everyone else on to the Control UI.
+	@root path /
+	handle @root {
+		reverse_proxy 127.0.0.1:{$APPROVER_PORT:9090}
+	}
+
 	# Token-gated pairing helper.
 	handle /setup* {
 		reverse_proxy 127.0.0.1:{$APPROVER_PORT:9090}

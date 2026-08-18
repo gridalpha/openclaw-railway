@@ -24,6 +24,7 @@ USER root
 COPY --from=caddy /usr/bin/caddy /usr/local/bin/caddy
 COPY Caddyfile /srv/Caddyfile
 COPY approver.mjs /srv/approver.mjs
+COPY setup.html /srv/setup.html
 COPY entrypoint.sh /usr/local/bin/openclaw-railway-entrypoint.sh
 RUN chmod +x /usr/local/bin/openclaw-railway-entrypoint.sh /usr/local/bin/caddy \
  && caddy validate --config /srv/Caddyfile --adapter caddyfile
