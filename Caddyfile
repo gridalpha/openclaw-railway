@@ -1,0 +1,29 @@
+# Caddy front-proxy for OpenClaw on Railway.
+# Railway terminates TLS at its edge and forwards plain HTTP, so auto_https is off.
+{
+	admin off
+	auto_https off
+	storage file_system {
+		root /tmp/caddy
+	}
+	# Trust Railway's CGNAT edge so the real client IP and X-Forwarded-Proto=https
+	# are preserved end to end (and the gateway keeps seeing a remote client, which
+	# is what keeps device pairing required rather than loopback auto-approved).
+	servers {
+		trusted_proxies static 100.64.0.0/10 fd00::/8
+	}
+}
+
+:{$PORT:8080} {
+	# Token-gated pairing helper.
+	handle /setup* {
+		reverse_proxy 127.0.0.1:{$APPROVER_PORT:9090}
+	}
+
+	# Everything else — Control UI, API, health, and WebSocket — to the gateway.
+	handle {
+		reverse_proxy 127.0.0.1:{$OPENCLAW_GATEWAY_PORT:8081} {
+			header_up Host {host}
+		}
+	}
+}

@@ -1,26 +1,32 @@
 # OpenClaw on Railway — thin wrapper over the upstream image.
 #
-# Why this repo exists (things Railway's UI/variables cannot express):
-#   1. Railway mounts volumes root-owned, but the upstream image runs as the
-#      non-root `node` user, so `node` cannot write /data. The entrypoint chowns
-#      the volume as root and then drops back to `node` before launching — which
-#      keeps the gateway non-root (the image's own security posture) instead of
-#      running everything as root via RAILWAY_RUN_UID=0.
-#   2. A non-loopback Control UI bind rejects unknown browser origins, so the
-#      entrypoint seeds gateway.controlUi.allowedOrigins from the Railway public
-#      domain at boot.
+# Adds a Caddy front-proxy and a tiny "setup" approver so the one-time device
+# pairing can be done from the browser instead of the Railway shell:
 #
-# No secrets are baked in: the gateway token is supplied as a Railway variable
-# (OPENCLAW_GATEWAY_TOKEN) at runtime.
+#   Caddy (public $PORT)
+#     ├── /setup*  → approver (token-gated: lists + approves pending pairings)
+#     └── *        → OpenClaw gateway (Control UI, API, WebSocket)
+#
+# The gateway moves to an internal port; Caddy owns the public port and forwards
+# X-Forwarded-* so the gateway still sees the real client (pairing stays required).
+#
+# Why the wrapper at all: Railway mounts volumes root-owned but the image runs as
+# non-root `node`, so the entrypoint chowns /data as root then drops to `node`.
+# No secrets are baked in — the gateway token is a Railway variable at runtime.
+FROM caddy:2-alpine AS caddy
+
 FROM openclaw/openclaw:latest
 
-# Root is needed ONLY so the entrypoint can chown the mounted volume. The
-# entrypoint drops back to the image's own `node` user (via setpriv) before it
-# exec's the gateway, so the long-running process is never root.
+# Root only so the entrypoint can chown the mounted volume; it drops to the
+# image's own `node` user (setpriv) before starting any long-running process.
 USER root
 
+COPY --from=caddy /usr/bin/caddy /usr/local/bin/caddy
+COPY Caddyfile /srv/Caddyfile
+COPY approver.mjs /srv/approver.mjs
 COPY entrypoint.sh /usr/local/bin/openclaw-railway-entrypoint.sh
-RUN chmod +x /usr/local/bin/openclaw-railway-entrypoint.sh
+RUN chmod +x /usr/local/bin/openclaw-railway-entrypoint.sh /usr/local/bin/caddy \
+ && caddy validate --config /srv/Caddyfile --adapter caddyfile
 
 # Keep the base image's tini as PID 1 (reaps tool/plugin child processes).
 ENTRYPOINT ["tini", "-s", "--"]

@@ -1,47 +1,56 @@
 # OpenClaw on Railway
 
-A thin wrapper image for deploying [OpenClaw](https://github.com/openclaw/openclaw)
-— a personal AI assistant gateway — on [Railway](https://railway.com).
+A wrapper image for deploying [OpenClaw](https://github.com/openclaw/openclaw) —
+a personal AI assistant gateway — on [Railway](https://railway.com).
 
-It builds `FROM openclaw/openclaw:latest` and adds a small entrypoint that adapts
-the image to Railway's runtime, without baking in any secrets.
+It builds `FROM openclaw/openclaw:latest`, adapts the image to Railway's runtime,
+and adds a small browser-based helper for the one-time device pairing. No secrets
+are baked in.
 
-## What the entrypoint does
+## Architecture
 
-1. **Volume ownership.** Railway mounts volumes root-owned, while the upstream
-   image runs as the non-root `node` user. The entrypoint (running as root only
-   for this step) `chown`s the `/data` volume to `node`, then **drops back to
-   `node`** with `setpriv` before launching the gateway — so the long-running
-   process is never root.
-2. **Control UI origin.** A non-loopback gateway bind rejects unknown browser
-   origins. The entrypoint seeds `gateway.controlUi.allowedOrigins` from
-   `RAILWAY_PUBLIC_DOMAIN` so the hosted Control UI is accepted.
-3. **Launch.** Starts the gateway bound to `lan` on `OPENCLAW_GATEWAY_PORT`.
+A single container runs three processes behind Caddy:
+
+```
+Caddy (public $PORT)
+  ├── /setup*  → approver   (token-gated: approve Control UI pairing from the browser)
+  └── *        → OpenClaw gateway (Control UI, API, WebSocket) on an internal port
+```
+
+- **Volume ownership.** Railway mounts volumes root-owned; the upstream image runs
+  as non-root `node`. The entrypoint chowns `/data` as root, then drops to `node`
+  (`setpriv`) before starting anything — so nothing long-running is root.
+- **Control UI origin.** A non-loopback bind rejects unknown browser origins, so the
+  entrypoint seeds `gateway.controlUi.allowedOrigins` from `RAILWAY_PUBLIC_DOMAIN`.
+- **Caddy** owns the public port, forwards `X-Forwarded-*` (so the gateway still sees
+  the real client and keeps requiring pairing), and proxies the Control UI WebSocket.
+
+## Pairing from the browser (`/setup`)
+
+OpenClaw requires a one-time device pairing for each browser, even with a valid
+token. Instead of the Railway shell, use the built-in helper:
+
+1. Open the **Control UI** (`/openclaw`), paste your `OPENCLAW_GATEWAY_TOKEN`, click
+   **Connect** → it shows "Device pairing required".
+2. Open **`/setup`**, paste the same token, and **Approve** the pending request.
+3. Back in the Control UI, click **Connect** again.
+
+The `/setup` endpoint is token-gated — approving a device grants full operator
+access, so it demands the same gateway token before listing or approving anything.
 
 ## Required variables
 
 | Variable | Purpose |
 |---|---|
-| `OPENCLAW_GATEWAY_TOKEN` | Admin secret that protects the gateway. Generate with `openssl rand -hex 32`. |
-| `OPENCLAW_GATEWAY_PORT` | HTTP port the gateway listens on (e.g. `8080`); also set Railway `PORT` to match and target the public domain at it. |
-| `OPENCLAW_STATE_DIR` | Persisted config/auth/sessions. Set to `/data/.openclaw`. |
-| `OPENCLAW_WORKSPACE_DIR` | Persisted workspace. Set to `/data/workspace`. |
-| `OPENCLAW_AUTH_PROFILE_SECRET_DIR` | Persisted auth-profile encryption keys. Set to `/data/.openclaw-auth-secrets`. |
+| `OPENCLAW_GATEWAY_TOKEN` | Admin secret protecting the gateway. `openssl rand -hex 32`. |
+| `PORT` | Public port Caddy listens on (e.g. `8080`); target the domain here. |
+| `OPENCLAW_GATEWAY_PORT` | Internal port the gateway listens on (e.g. `8081`). |
+| `OPENCLAW_STATE_DIR` | Persisted config/auth/sessions. `/data/.openclaw`. |
+| `OPENCLAW_WORKSPACE_DIR` | Persisted workspace. `/data/workspace`. |
+| `OPENCLAW_AUTH_PROFILE_SECRET_DIR` | Persisted auth-profile keys. `/data/.openclaw-auth-secrets`. |
 
-Attach a volume at `/data` and enable public networking on the gateway port.
-
-## First-run pairing
-
-For security, OpenClaw's Control UI requires a **one-time device pairing** for
-each browser, even with a valid token. After deploying, open the Railway shell for
-the service and run:
-
-```
-openclaw dashboard --no-open
-```
-
-Open the printed one-time URL in your browser to pair it as the owner. See the
-[OpenClaw device pairing docs](https://docs.openclaw.ai/web/control-ui#device-pairing-first-connection).
+Attach a volume at `/data` and enable public networking on `PORT`. After pairing,
+add a model-provider key in the Control UI's Settings so the assistant can reply.
 
 ## License
 
